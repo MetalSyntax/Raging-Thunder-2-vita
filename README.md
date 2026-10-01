@@ -61,19 +61,55 @@ On the Vita:
 
 ## Controls
 
+Default layout (remappable, see below):
+
 | Vita input | In-game action |
 |---|---|
-| ✕ Cross / R trigger | Accelerate |
-| ■ Square / L trigger | Brake |
+| ✕ Cross / R trigger | Accelerate (OK in menus) |
+| ■ Square / L trigger | Brake / reverse |
 | ▲ Triangle | Nitro / action |
 | ● Circle / Start | Back / pause |
 | D-Pad | Menus |
 | Left stick | Steering (emulated tilt; D-Pad in menus) |
 | Touch screen | Menus and HUD |
+| **Start + Select** | **PS Vita controls menu** |
 
 Steering follows the game's tilt mode: when a race uses tilt steering, the left stick
-emulates the accelerometer; set `steering 1` in `config.txt` to use the Vita's real
-motion sensor instead.
+emulates the accelerometer; choose *Tilt (motion)* in the controls menu (or set
+`steering 1` in `config.txt`) to use the Vita's real motion sensor instead.
+
+### Remapping
+
+Press **Start + Select** at any time (menus or race) to open the **PS Vita controls**
+menu. The game is paused while it is open (clock frozen, audio muted).
+
+| In the menu | |
+|---|---|
+| D-Pad up/down | Choose a row |
+| ✕ on an action | Replace its buttons (press the new button) |
+| ■ on an action | Add another button |
+| ▲ on an action | Clear it |
+| D-Pad left/right | Change steering mode, sensitivity, invert, car ground tint |
+| ● / Start | Save and close |
+
+Bindings are saved to `ux0:data/ragingthunder2/controls.txt`, which can also be edited
+by hand (created with the defaults on first boot):
+
+```ini
+ACCELERATE = CROSS
+BRAKE = SQUARE
+NITRO = TRIANGLE
+BACK = CIRCLE
+L = L1          # shoulder keys: brake / accelerate in the race,
+R = R1          # page switch in the menus
+UP = UP
+DOWN = DOWN
+LEFT = LEFT
+RIGHT = RIGHT
+```
+
+Buttons: `CROSS, CIRCLE, SQUARE, TRIANGLE, L1, R1, UP, DOWN, LEFT, RIGHT, SELECT, NONE`.
+Start is always back/pause and is not bindable. `BUTTON = ACTION` lines are accepted too.
 
 ## Settings
 
@@ -90,6 +126,7 @@ motion sensor instead.
 | `engine_log` | `0` | 0/1, verbose engine log (for debugging) |
 | `vfp_float` | `1` | 0/1, hardware float helpers |
 | `xperia_pad` | `1` | 0/1, Xperia Play button layout |
+| `car_ground_tint` | `1` | Car tint from the ground under the wheels: 0 = off (plain paint), 1 = original, 2 = original with R/B swapped |
 
 ## Building from source
 
@@ -109,7 +146,9 @@ This produces `eboot.bin` and `ragingthunder2.vpk`. vitaGL is vendored under
 ## Known issues
 
 - Online features (news / multiplayer) attempt raw sockets without `sceNetInit` — they fail gracefully but have no connectivity.
-- If car paint looks off, delete the cached shaders so they regenerate (see [CHANGELOG](CHANGELOG.md)).
+- Quitting from the main menu takes a few seconds (the engine releases its resources in `OnDestroy`).
+- Cars take a tint from the ground under them (darker in tunnels, cooler on dusk tracks),
+  as the original game does; set `car_ground_tint 0` for the plain paint colors.
 
 Found a bug? Please open an issue with your log file
 (`ux0:data/ragingthunder2/logs/ragingthunder2_NNN.log`) attached.

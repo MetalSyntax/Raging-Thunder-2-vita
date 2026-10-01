@@ -21,6 +21,7 @@ int  setting_msaa;
 bool setting_engineLog;
 bool setting_vfpFloat;
 bool setting_xperiaPad;
+int  setting_carGroundTint;
 
 void settings_reset() {
     setting_language         = 0;              // system language
@@ -32,6 +33,7 @@ void settings_reset() {
     setting_engineLog        = false;
     setting_vfpFloat         = true;
     setting_xperiaPad        = true;
+    setting_carGroundTint    = 1;
 }
 
 void settings_load() {
@@ -53,6 +55,7 @@ void settings_load() {
             else if (strcmp("engine_log", buffer) == 0)        setting_engineLog        = (bool)value;
             else if (strcmp("vfp_float", buffer) == 0)         setting_vfpFloat         = (bool)value;
             else if (strcmp("xperia_pad", buffer) == 0)        setting_xperiaPad        = (bool)value;
+            else if (strcmp("car_ground_tint", buffer) == 0)   setting_carGroundTint    = value;
         }
         fclose(config);
     }
@@ -62,6 +65,7 @@ void settings_load() {
     if (setting_steerSensitivity < 25) setting_steerSensitivity = 25;
     if (setting_steerSensitivity > 400) setting_steerSensitivity = 400;
     if (setting_msaa < 0 || setting_msaa > 2) setting_msaa = 2;
+    if (setting_carGroundTint < 0 || setting_carGroundTint > 2) setting_carGroundTint = 1;
 
     // Always rewrite: writes the defaults on first boot and adds keys that
     // are new in this version to an existing config.txt.
@@ -81,6 +85,7 @@ void settings_save() {
         fprintf(config, "%s %d\n", "engine_log", (int)setting_engineLog);
         fprintf(config, "%s %d\n", "vfp_float", (int)setting_vfpFloat);
         fprintf(config, "%s %d\n", "xperia_pad", (int)setting_xperiaPad);
+        fprintf(config, "%s %d\n", "car_ground_tint", setting_carGroundTint);
         fclose(config);
     }
 }

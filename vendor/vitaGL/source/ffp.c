@@ -1196,7 +1196,10 @@ void _glDrawArrays_FixedFunctionIMPL(GLint first, GLsizei count) {
 #endif
 				id = i;
 			void *ptr;
-			if (ffp_vertex_attrib_vbo[id]) {
+			// Raging Thunder 2 port (see VENDORED.md): a material attribute that is
+			// constant (glMaterial, no color array) must not be read from the VBO
+			// last bound to that slot by an older glColorPointer.
+			if (ffp_vertex_attrib_vbo[id] && !(ffp_lighting_streams && FFP_ATTRIB_IS_LIGHT(id) && ffp_lighting_streams[FFP_ATTRIB_LIGHT_COEFF(id)].stride == 0)) {
 				vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[id];
 				gpu_buf->last_frame = vgl_framecount;
 				ptr = (uint8_t *)gpu_buf->ptr + ffp_vertex_attrib_offsets[id] + first * ffp_vertex_stream_config[id].stride;
@@ -1332,7 +1335,10 @@ void _glMultiDrawArrays_FixedFunctionIMPL(SceGxmPrimitiveType gxm_p, uint16_t *i
 			{
 				id = i;
 			}
-			if (ffp_vertex_attrib_vbo[id]) {
+			// Raging Thunder 2 port (see VENDORED.md): a material attribute that is
+			// constant (glMaterial, no color array) must not be read from the VBO
+			// last bound to that slot by an older glColorPointer.
+			if (ffp_vertex_attrib_vbo[id] && !(ffp_lighting_streams && FFP_ATTRIB_IS_LIGHT(id) && ffp_lighting_streams[FFP_ATTRIB_LIGHT_COEFF(id)].stride == 0)) {
 				vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[id];
 				gpu_buf->last_frame = vgl_framecount;
 				ptrs[j] = (uint8_t *)gpu_buf->ptr + ffp_vertex_attrib_offsets[i] + lowest * ffp_vertex_stream_config[id].stride;
@@ -1519,7 +1525,10 @@ void _glDrawElements_FixedFunctionIMPL(uint16_t *idx_buf, GLsizei count, uint32_
 	for (int i = 0; i < attr_num; i++) {
 		void *ptr;
 		int attr_idx = attr_idxs[i];
-		if (ffp_vertex_attrib_vbo[attr_idx]) {
+		// Raging Thunder 2 port (see VENDORED.md): a material attribute that is
+		// constant (glMaterial, no color array) must not be read from the VBO
+		// last bound to that slot by an older glColorPointer.
+		if (ffp_vertex_attrib_vbo[attr_idx] && !(ffp_lighting_streams && FFP_ATTRIB_IS_LIGHT(attr_idx) && ffp_lighting_streams[FFP_ATTRIB_LIGHT_COEFF(attr_idx)].stride == 0)) {
 			vbo *gpu_buf = (vbo *)ffp_vertex_attrib_vbo[attr_idx];
 			gpu_buf->last_frame = vgl_framecount;
 			ptr = (uint8_t *)gpu_buf->ptr + ffp_vertex_attrib_offsets[attr_idx];

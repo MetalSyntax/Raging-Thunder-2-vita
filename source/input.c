@@ -28,7 +28,9 @@
  *   102/103 L1/R1              0xe/0xf 0x200/0x400
  *
  * so Cross/R share one action and Square/L the other, like on the Xperia
- * Play. Start is BACK as well (the game's pause/back key).
+ * Play. The physical buttons are remappable (controls.txt / port menu):
+ * every action below sends one of these keycodes. START is not bindable: it
+ * is the BACK key (sent on release) and, with SELECT, opens the port menu.
  *
  * Touch: OnEvent(1, 1, x, y, action | (pointer_id + 1) << 16), Android
  * MotionEvent actions (0 down, 1 up, 2 move, 5/6 pointer down/up), in
@@ -47,6 +49,7 @@
 #include "input.h"
 
 #include "java.h"
+#include "vita_menu.h"
 #include "utils/logger.h"
 #include "utils/settings.h"
 
@@ -56,7 +59,9 @@
 
 #include <falso_jni/FalsoJNI.h>
 
+#include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -98,27 +103,72 @@ static void send(int type, int sub, int a, int b, int c) {
 
 /* --- keys ------------------------------------------------------------------- */
 
-static const struct {
-    uint32_t button;
-    int keycode;
-} button_map[] = {
-    { SCE_CTRL_UP,       KEY_DPAD_UP },
-    { SCE_CTRL_DOWN,     KEY_DPAD_DOWN },
-    { SCE_CTRL_LEFT,     KEY_DPAD_LEFT },
-    { SCE_CTRL_RIGHT,    KEY_DPAD_RIGHT },
-    { SCE_CTRL_CROSS,    KEY_DPAD_CENTER },
-    { SCE_CTRL_SQUARE,   KEY_BUTTON_X },
-    { SCE_CTRL_TRIANGLE, KEY_BUTTON_Y },
-    { SCE_CTRL_CIRCLE,   KEY_BACK },
-    { SCE_CTRL_START,    KEY_BACK },
-    { SCE_CTRL_LTRIGGER, KEY_BUTTON_L1 },
-    { SCE_CTRL_L1,       KEY_BUTTON_L1 },
-    { SCE_CTRL_RTRIGGER, KEY_BUTTON_R1 },
-    { SCE_CTRL_R1,       KEY_BUTTON_R1 },
+/* Remappable actions, saved in DATA_PATH controls.txt (written with the
+ * defaults if missing) and edited in game with the port menu (vita_menu.c). */
+#define CONTROLS_PATH    DATA_PATH "controls.txt"
+#define CONTROLS_VERSION 1
+
+typedef struct {
+    const char *name;           // controls.txt key
+    const char *label;          // port menu
+    int keycode;                // Android keycode sent to the engine
+    uint32_t default_buttons;
+    uint32_t buttons;           // current binding
+    int down;                   // keycode currently held by this action
+} Action;
+
+enum { ACT_ACCELERATE, ACT_BRAKE, ACT_NITRO, ACT_BACK, ACT_L, ACT_R,
+       ACT_UP, ACT_DOWN, ACT_LEFT, ACT_RIGHT, ACT_COUNT };
+
+static Action actions[ACT_COUNT] = {
+    [ACT_ACCELERATE] = { "ACCELERATE", "Accelerate / OK",       KEY_DPAD_CENTER, SCE_CTRL_CROSS },
+    [ACT_BRAKE]      = { "BRAKE",      "Brake / reverse",       KEY_BUTTON_X,    SCE_CTRL_SQUARE },
+    [ACT_NITRO]      = { "NITRO",      "Nitro / action",        KEY_BUTTON_Y,    SCE_CTRL_TRIANGLE },
+    [ACT_BACK]       = { "BACK",       "Back / pause",          KEY_BACK,        SCE_CTRL_CIRCLE },
+    [ACT_L]          = { "L",          "L: brake, menu page",   KEY_BUTTON_L1,   SCE_CTRL_LTRIGGER },
+    [ACT_R]          = { "R",          "R: accel., menu page",  KEY_BUTTON_R1,   SCE_CTRL_RTRIGGER },
+    [ACT_UP]         = { "UP",         "Up (menus)",            KEY_DPAD_UP,     SCE_CTRL_UP },
+    [ACT_DOWN]       = { "DOWN",       "Down (menus)",          KEY_DPAD_DOWN,   SCE_CTRL_DOWN },
+    [ACT_LEFT]       = { "LEFT",       "Left (menus/steer)",    KEY_DPAD_LEFT,   SCE_CTRL_LEFT },
+    [ACT_RIGHT]      = { "RIGHT",      "Right (menus/steer)",   KEY_DPAD_RIGHT,  SCE_CTRL_RIGHT },
 };
 
-// Several sources can hold the same keycode (Circle and Start, d-pad and the
-// stick): only the first press and the last release reach the engine.
+typedef struct {
+    const char *name;   // controls.txt spelling (first one per mask is canonical)
+    const char *label;  // port menu
+    uint32_t mask;
+} ButtonName;
+
+static const ButtonName button_names[] = {
+    { "CROSS",      "Cross",    SCE_CTRL_CROSS },
+    { "CIRCLE",     "Circle",   SCE_CTRL_CIRCLE },
+    { "SQUARE",     "Square",   SCE_CTRL_SQUARE },
+    { "TRIANGLE",   "Triangle", SCE_CTRL_TRIANGLE },
+    { "L1",         "L",        SCE_CTRL_LTRIGGER },
+    { "R1",         "R",        SCE_CTRL_RTRIGGER },
+    { "UP",         "Up",       SCE_CTRL_UP },
+    { "DOWN",       "Down",     SCE_CTRL_DOWN },
+    { "LEFT",       "Left",     SCE_CTRL_LEFT },
+    { "RIGHT",      "Right",    SCE_CTRL_RIGHT },
+    { "SELECT",     "Select",   SCE_CTRL_SELECT },
+    { "START",      "Start",    SCE_CTRL_START },
+    // Aliases, only read.
+    { "X",          NULL,       SCE_CTRL_CROSS },
+    { "O",          NULL,       SCE_CTRL_CIRCLE },
+    { "L",          NULL,       SCE_CTRL_LTRIGGER },
+    { "LTRIGGER",   NULL,       SCE_CTRL_LTRIGGER },
+    { "R",          NULL,       SCE_CTRL_RTRIGGER },
+    { "RTRIGGER",   NULL,       SCE_CTRL_RTRIGGER },
+    { "DPAD_UP",    NULL,       SCE_CTRL_UP },
+    { "DPAD_DOWN",  NULL,       SCE_CTRL_DOWN },
+    { "DPAD_LEFT",  NULL,       SCE_CTRL_LEFT },
+    { "DPAD_RIGHT", NULL,       SCE_CTRL_RIGHT },
+};
+#define BUTTON_NAMES_COUNT (sizeof(button_names) / sizeof(button_names[0]))
+
+// Several sources can hold the same keycode (two actions, START and BACK,
+// d-pad and the stick): only the first press and the last release reach the
+// engine.
 static uint8_t key_refs[128];
 
 static void key_set(int keycode, int down) {
@@ -133,6 +183,8 @@ static void key_set(int keycode, int down) {
 
 static uint32_t buttons_held = 0;
 static int stick_dir_held[4] = {0}; // left, right, up, down via the stick
+static int start_combo;             // START held and used for START + SELECT
+static int start_tap;               // BACK pressed for START, released next frame
 
 /* --- touch ------------------------------------------------------------------ */
 
@@ -262,17 +314,23 @@ void input_init(fuse_on_event_fn on_event) {
 
     memset(slots, 0, sizeof(slots));
     memset(key_refs, 0, sizeof(key_refs));
+    input_reload_controls();
     l_info("input: ready (steering: %s, sensitivity %d%%, invert %d)",
            setting_steering == STEERING_MOTION ? "motion" : "left stick",
            setting_steerSensitivity, setting_invertSteering);
 }
 
 void input_release_all(void) {
-    for (unsigned i = 0; i < sizeof(button_map) / sizeof(button_map[0]); i++) {
-        if (buttons_held & button_map[i].button)
-            key_set(button_map[i].keycode, 0);
+    for (int i = 0; i < ACT_COUNT; i++) {
+        if (actions[i].down) {
+            key_set(actions[i].keycode, 0);
+            actions[i].down = 0;
+        }
     }
-    buttons_held = 0;
+    if (start_tap) {
+        key_set(KEY_BACK, 0);
+        start_tap = 0;
+    }
     static const int dir_keys[4] = { KEY_DPAD_LEFT, KEY_DPAD_RIGHT, KEY_DPAD_UP, KEY_DPAD_DOWN };
     for (int i = 0; i < 4; i++) {
         if (stick_dir_held[i]) {
@@ -294,15 +352,55 @@ void input_update(void) {
     memset(&pad, 0, sizeof(pad));
     sceCtrlPeekBufferPositive(0, &pad, 1);
 
-    // Buttons
-    for (unsigned i = 0; i < sizeof(button_map) / sizeof(button_map[0]); i++) {
-        uint32_t b = button_map[i].button;
-        int now = (pad.buttons & b) != 0;
-        int before = (buttons_held & b) != 0;
-        if (now != before)
-            key_set(button_map[i].keycode, now);
+    uint32_t buttons = pad.buttons;
+    uint32_t pressed = buttons & ~buttons_held;
+    uint32_t released = buttons_held & ~buttons;
+    buttons_held = buttons;
+
+    // BACK sent for a START tap last frame: release it now.
+    if (start_tap) {
+        key_set(KEY_BACK, 0);
+        start_tap = 0;
     }
-    buttons_held = pad.buttons;
+
+    if (vita_menu_active()) {
+        if (!(buttons & SCE_CTRL_START))
+            start_combo = 0;
+        vita_menu_update(buttons, pressed);
+        // Closed with START: its release must not count as BACK.
+        if (!vita_menu_active() && (buttons & SCE_CTRL_START))
+            start_combo = 1;
+        return;
+    }
+
+    // START + SELECT (either order) opens the port menu. START alone is the
+    // BACK key, sent on release so that the combo doesn't also pause.
+    if (((buttons & SCE_CTRL_START) && (pressed & SCE_CTRL_SELECT)) ||
+        ((buttons & SCE_CTRL_SELECT) && (pressed & SCE_CTRL_START))) {
+        start_combo = 1;
+        input_release_all();
+        vita_menu_open();
+        return;
+    }
+    if (released & SCE_CTRL_START) {
+        if (!start_combo) {
+            key_set(KEY_BACK, 1);
+            start_tap = 1;
+        }
+        start_combo = 0;
+    }
+
+    // Remappable actions. SELECT is left out while START is held (combo).
+    uint32_t act_buttons = buttons & ~SCE_CTRL_START;
+    if (buttons & SCE_CTRL_START)
+        act_buttons &= ~SCE_CTRL_SELECT;
+    for (int i = 0; i < ACT_COUNT; i++) {
+        int now = (act_buttons & actions[i].buttons) != 0;
+        if (now != actions[i].down) {
+            key_set(actions[i].keycode, now);
+            actions[i].down = now;
+        }
+    }
 
     // Left stick
     float sx = stick_axis(pad.lx);
@@ -333,4 +431,205 @@ void input_update(void) {
     }
 
     touch_update();
+}
+
+/* --- bindings (controls.txt, port menu) ------------------------------------- */
+
+int input_action_count(void) {
+    return ACT_COUNT;
+}
+
+const char *input_action_label(int action) {
+    return action >= 0 && action < ACT_COUNT ? actions[action].label : "";
+}
+
+uint32_t input_action_buttons(int action) {
+    return action >= 0 && action < ACT_COUNT ? actions[action].buttons : 0;
+}
+
+void input_action_bind(int action, uint32_t button, int add) {
+    if (action < 0 || action >= ACT_COUNT)
+        return;
+    for (int i = 0; i < ACT_COUNT; i++)
+        actions[i].buttons &= ~button;
+    if (add)
+        actions[action].buttons |= button;
+    else
+        actions[action].buttons = button;
+}
+
+void input_action_clear(int action) {
+    if (action >= 0 && action < ACT_COUNT)
+        actions[action].buttons = 0;
+}
+
+void input_controls_defaults(void) {
+    for (int i = 0; i < ACT_COUNT; i++)
+        actions[i].buttons = actions[i].default_buttons;
+}
+
+uint32_t input_bindable_buttons(void) {
+    uint32_t mask = 0;
+    for (unsigned i = 0; i < BUTTON_NAMES_COUNT; i++)
+        if (button_names[i].label)
+            mask |= button_names[i].mask;
+    return mask & ~SCE_CTRL_START;
+}
+
+static void buttons_join(uint32_t mask, char *out, size_t size, int labels) {
+    size_t len = 0;
+    out[0] = '\0';
+    for (unsigned i = 0; i < BUTTON_NAMES_COUNT; i++) {
+        const ButtonName *b = &button_names[i];
+        if (!b->label || !(mask & b->mask))
+            continue;
+        int n = snprintf(out + len, size - len, "%s%s", len ? ", " : "", labels ? b->label : b->name);
+        if (n < 0 || (size_t) n >= size - len)
+            break;
+        len += n;
+    }
+    if (!len)
+        snprintf(out, size, "%s", labels ? "-" : "NONE");
+}
+
+void input_buttons_text(uint32_t mask, char *out, size_t size) {
+    buttons_join(mask, out, size, 1);
+}
+
+// Copies the first word of `s` (up to whitespace, ',', '=', ':', '#', ';'),
+// upper-cased.
+static void word(const char *s, char *out, size_t size) {
+    while (*s == ' ' || *s == '\t')
+        s++;
+    size_t len = 0;
+    while (*s && !strchr(" \t,=:#;\r\n", *s) && len < size - 1)
+        out[len++] = (char) toupper((unsigned char) *s++);
+    out[len] = '\0';
+}
+
+static uint32_t parse_button_token(const char *tok) {
+    char clean[32];
+    word(tok, clean, sizeof(clean));
+    if (!clean[0] || strcmp(clean, "NONE") == 0)
+        return 0;
+    for (unsigned i = 0; i < BUTTON_NAMES_COUNT; i++) {
+        if (strcmp(clean, button_names[i].name) == 0)
+            return button_names[i].mask & ~SCE_CTRL_START;
+    }
+    l_warn("input: unknown button '%s'", clean);
+    return 0;
+}
+
+static uint32_t parse_button_list(const char *p) {
+    uint32_t mask = 0;
+    while (*p && *p != '#' && *p != ';' && *p != '\r' && *p != '\n') {
+        mask |= parse_button_token(p);
+        while (*p && *p != ',' && *p != '#' && *p != ';' && *p != '\r' && *p != '\n')
+            p++;
+        if (*p == ',')
+            p++;
+    }
+    return mask;
+}
+
+static int find_action_index(const char *name) {
+    char clean[32];
+    word(name, clean, sizeof(clean));
+    for (int i = 0; i < ACT_COUNT; i++) {
+        if (strcmp(clean, actions[i].name) == 0)
+            return i;
+    }
+    return -1;
+}
+
+void input_controls_save(void) {
+    FILE *f = fopen(CONTROLS_PATH, "w");
+    if (!f) {
+        l_error("input: cannot write %s", CONTROLS_PATH);
+        return;
+    }
+    fprintf(f,
+        "# Raging Thunder 2 - PS Vita controls\n"
+        "# Also editable in game: START + SELECT.\n"
+        "#\n"
+        "# Buttons: CROSS, CIRCLE, SQUARE, TRIANGLE, L1, R1, UP, DOWN, LEFT, RIGHT,\n"
+        "#   SELECT, NONE. START is always back / pause.\n"
+        "#\n"
+        "# Actions:\n"
+        "#   ACCELERATE   Accelerate, OK in the menus\n"
+        "#   BRAKE        Brake / reverse\n"
+        "#   NITRO        Nitro / action\n"
+        "#   BACK         Back / pause\n"
+        "#   L, R         Shoulder keys: brake / accelerate in the race, page\n"
+        "#                switch in the menus\n"
+        "#   UP, DOWN, LEFT, RIGHT   D-pad (menus; LEFT/RIGHT also steer with the\n"
+        "#                buttons steering option)\n"
+        "# The left stick always steers (or moves in the menus).\n"
+        "#\n"
+        "# ACTION = BUTTON, BUTTON ...   (or BUTTON = ACTION)\n"
+        "\n"
+        "VERSION = %d\n", CONTROLS_VERSION);
+    for (int i = 0; i < ACT_COUNT; i++) {
+        char list[128];
+        buttons_join(actions[i].buttons, list, sizeof(list), 0);
+        fprintf(f, "%s = %s\n", actions[i].name, list);
+    }
+    fclose(f);
+}
+
+void input_reload_controls(void) {
+    input_controls_defaults();
+
+    FILE *f = fopen(CONTROLS_PATH, "r");
+    if (!f) {
+        input_controls_save();
+        l_info("input: generated default %s", CONTROLS_PATH);
+        return;
+    }
+
+    uint32_t parsed[ACT_COUNT] = {0};
+    int seen[ACT_COUNT] = {0};
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '#' || *p == ';' || *p == '\r' || *p == '\n' || *p == '\0')
+            continue;
+        char *eq = strpbrk(p, "=:");
+        if (!eq)
+            continue;
+        *eq = '\0';
+        char *right = eq + 1;
+
+        char key[32];
+        word(p, key, sizeof(key));
+        if (strcmp(key, "VERSION") == 0)
+            continue;
+
+        int act = find_action_index(p);
+        if (act >= 0) {
+            seen[act] = 1;
+            parsed[act] |= parse_button_list(right);
+        } else {
+            act = find_action_index(right);
+            uint32_t btn = parse_button_token(p);
+            if (act >= 0 && btn) {
+                seen[act] = 1;
+                parsed[act] |= btn;
+            }
+        }
+    }
+    fclose(f);
+
+    for (int i = 0; i < ACT_COUNT; i++)
+        if (seen[i])
+            actions[i].buttons = parsed[i];
+    for (int i = 0; i < ACT_COUNT; i++)
+        l_info("input: %-10s -> 0x%08X", actions[i].name, actions[i].buttons);
+}
+
+void input_apply_settings(void) {
+    if (setting_steering == STEERING_MOTION)
+        sceMotionStartSampling();
 }

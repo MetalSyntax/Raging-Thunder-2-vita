@@ -32,6 +32,7 @@ extern int  setting_msaa;           ///< 0 off, 1 2x, 2 4x
 extern bool setting_engineLog;      ///< engine __android_log_print/_PDebug -> log
 extern bool setting_vfpFloat;       ///< run the engine's soft-float helpers on VFP
 extern bool setting_xperiaPad;      ///< tell the game the Xperia Play gamepad is open
+extern int  setting_carGroundTint;  ///< 0 off, 1 original (default), 2 original with R/B swapped
 
 void settings_load();
 void settings_save();

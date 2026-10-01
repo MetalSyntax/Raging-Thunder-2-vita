@@ -33,6 +33,31 @@ Detalle:
   `source/reimpl/egl.c` queda fuera del build (CMakeLists.txt).
 - `Makefile`: `git rev-parse` con fallback a "unknown" (ya no hay repo git aca).
 - `source/vgl.c`: ver el diff completo abajo.
+- `source/shaders/ffp_v.h` (Raging Thunder 2): las coordenadas de textura de
+  las unidades 0 y 1 son `float3` y se transforman con `float4(tc, 1)` en vez
+  de `float2` + `float4(tc, 0, 1)`. GLES1 permite `glTexCoordPointer(3, ...)`:
+  el motor Polarbit pasa las normales como UV de la unidad 1 con una matriz de
+  textura 3D para el reflejo de la pintura (`bite::CShaderCarPaint`); con
+  `float2` se perdia la z y el reflejo teñia mal los autos. Con UV de 2
+  componentes GXM rellena z = 0, asi que el resultado no cambia.
+- `source/utils/gpu_utils.c` (Raging Thunder 2): `gpu_alloc_compressed_texture()`
+  llama a `sceGxmTransferFinish()` antes de reasignar/liberar `tex->data`. El
+  nivel 0 de un DXT potencia de 2 se swizzlea con un `sceGxmTransferCopy`
+  asincrono; al subir el nivel 1, `vgl_realloc()` podia mover el buffer con la
+  copia todavia en vuelo y la textura quedaba entera en cero (asfalto negro,
+  al azar segun el heap: misma fuente, una textura bien y otra en cero).
+  Ademas `VGL_ASYNC_COMPRESSED_UPLOAD 0` en `gpu_alloc_compressed_texture()` /
+  `gpu_alloc_compressed_cube_texture()`: el swizzle de DXT/PVRTC2 se hace en CPU
+  (`SwizzleTexData*`) y no con `sceGxmTransferCopy` desde el pool temporal por
+  frame; solo con el Finish seguian quedando texturas en cero al dibujarlas.
+- `source/ffp.c` (Raging Thunder 2): al armar los streams de vertices de un
+  draw FFP, un atributo de material constante (glMaterial con iluminacion y sin
+  color array, stride 0) ya no se lee del VBO que quedo asociado a ese slot por
+  un `glColorPointer` anterior. Antes `if (ffp_vertex_attrib_vbo[id])` se
+  evaluaba primero: los autos tomaban como color ambiente 4 floats basura del
+  VBO de la pista (y la luz del juego tiene ambiente 1.0) -> autos verdes, rojos,
+  azules o negros segun lo ultimo dibujado. Tres sitios (DrawArrays,
+  DrawElements, rango de indices).
 - `build_vitagl.sh`: script propio de este port (NO es de upstream). Lo invoca
   CMakeLists.txt para hacer `make clean` solo cuando cambian los flags.
 

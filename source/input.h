@@ -13,6 +13,9 @@
 #ifndef SOLOADER_INPUT_H
 #define SOLOADER_INPUT_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -28,6 +31,28 @@ void input_update(void);
 
 /** Release everything that is held (before suspending / when the IME opens). */
 void input_release_all(void);
+
+/** Reload the button bindings from controls.txt (written with the defaults
+ *  if missing). */
+void input_reload_controls(void);
+/** Apply settings changed in the port menu (steering mode). */
+void input_apply_settings(void);
+
+/* --- bindings, used by the port menu (vita_menu.c) ---------------------- */
+
+int         input_action_count(void);
+const char *input_action_label(int action);
+uint32_t    input_action_buttons(int action);
+/** Bind `button` (one bit) to `action`, removing it from every other action.
+ *  `add` keeps the buttons the action already had. */
+void        input_action_bind(int action, uint32_t button, int add);
+void        input_action_clear(int action);
+void        input_controls_defaults(void);
+void        input_controls_save(void);
+/** Buttons that can be bound (everything but START). */
+uint32_t    input_bindable_buttons(void);
+/** "R, Cross" style list of the buttons in `mask` ("-" if none). */
+void        input_buttons_text(uint32_t mask, char *out, size_t size);
 
 #ifdef __cplusplus
 };

@@ -26,6 +26,8 @@ void gl_init();
 void gl_preload();
 
 void gl_swap();
+/** Present without the port menu hook (used by the menu itself). */
+void gl_swap_raw();
 
 void glCompileShader_soloader(GLuint shader);
 

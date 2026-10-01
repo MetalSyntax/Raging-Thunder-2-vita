@@ -182,6 +182,9 @@ void audio_shutdown(void) {
     if (!audio_running)
         return;
     audio_running = 0;
-    sceKernelWaitThreadEnd(audio_thid, NULL, NULL);
+    // One granule is ~23 ms; never block the exit on it for more than 1 s.
+    SceUInt timeout = 1000000;
+    if (sceKernelWaitThreadEnd(audio_thid, NULL, &timeout) < 0)
+        l_warn("audio: pump thread did not stop in time");
     audio_thid = -1;
 }

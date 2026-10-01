@@ -80,9 +80,9 @@ void calculate_light(short i, float3 ecPosition, float3 N, float4 inout Ambient,
 void main(
 	float4 Nposition,
 #if num_textures > 0
-	float2 Otexcoord0,
+	float3 Otexcoord0, // float3: GLES1 allows size 3 texcoords (see VENDORED.md)
 #if num_textures > 1
-	float2 Utexcoord1,
+	float3 Utexcoord1,
 #endif
 #endif
 #if has_colors == 1 || lights_num > 0
@@ -172,14 +172,14 @@ void main(
 
 #if num_textures > 0
 #if (fixed_mode_mask & 0x02) == 0x02
-	Otexcoord0 = GLFixed2ToFloat2(Otexcoord0);
+	Otexcoord0 = GLFixed3ToFloat3(Otexcoord0);
 #endif
-	vTexcoord = mul(Ktexmat[0], float4(Otexcoord0, 0.f, 1.f)).xy;
+	vTexcoord = mul(Ktexmat[0], float4(Otexcoord0, 1.f)).xy;
 #if num_textures > 1
 #if (fixed_mode_mask & 0x04) == 0x04
-	Utexcoord1 = GLFixed2ToFloat2(Utexcoord1);
+	Utexcoord1 = GLFixed3ToFloat3(Utexcoord1);
 #endif
-	vTexcoord2 = mul(Ktexmat[1], float4(Utexcoord1, 0.f, 1.f)).xy;
+	vTexcoord2 = mul(Ktexmat[1], float4(Utexcoord1, 1.f)).xy;
 #endif
 #endif
 #if lights_num > 0

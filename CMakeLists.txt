@@ -35,7 +35,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "Raging Thunder 2")
 set(VITA_TITLEID "PSVRT0002")
 set(VITA_VPKNAME "ragingthunder2")
-set(VITA_VERSION "01.00")
+set(VITA_VERSION "01.01")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 
 # Optional: used for "send" and "dump" targets
@@ -89,6 +89,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=gnu++20 -Wno-write-strings -Wno-psabi
 add_executable(${CMAKE_PROJECT_NAME}
                source/main.c
                source/input.c
+               source/overlay.c
+               source/vita_menu.c
                source/dynlib.c
                source/java.c
                source/patch.c

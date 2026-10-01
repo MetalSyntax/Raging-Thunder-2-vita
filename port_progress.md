@@ -105,9 +105,69 @@ Arranque completo hasta "Entering main loop." + audio 22050 Hz estéreo OK; cras
   News/red, no relacionados. Vigilar en la próxima prueba.
 
 Probar un fallo a la vez; log en `ux0:data/ragingthunder2/logs/ragingthunder2_NNN.log`.
+
+### Prueba 2 — log 002 (2026-10-01): FUNCIONA
+Arranca, menús y carreras jugables. `ActivateAccelerometer(1)` ya sale limpio. Sin crashes.
+Commit inicial `885e2ba`. Reporte del usuario: **colores de los autos con el tono cambiado**.
+- Análisis: la pintura de los autos (`bite::CShaderCarPaint::Begin`) = textura base (unidad 0)
+  iluminada con material = color de pintura, + reflejo de entorno en la unidad 1 con
+  `GL_ADD` (`SetTextureCombiner` modo 3), cuyas UV son **las normales** (3 componentes,
+  `CVertexBuffer::ApplyComponent(1, 4)` → `glTexCoordPointer(3, ...)`) transformadas por
+  una matriz de textura 3D (normal → espacio de cámara, ×0.5 + 0.5).
+- vitaGL declaraba las UV del shader FFP como `float2` (`float4(tc, 0, 1)`): se perdía la z
+  de la normal → el reflejo muestreaba la zona equivocada del mapa de entorno y teñía la
+  carrocería. Las pistas no usan esa pasada, por eso solo fallaban los autos.
+- Descartado con evidencia: texturas DXT/paletizadas (conversión correcta en vitaGL),
+  `glMaterialxv`/`glLightxv` (correctos), colores de vértice (`GL_UNSIGNED_BYTE`, soportado),
+  softfloat (el backend ES11 no usa floats en esa ruta).
+- **Fix**: `vendor/vitaGL/source/shaders/ffp_v.h`: UV `float3` + `float4(tc, 1)` (unidades
+  0 y 1). La caché de shaders en disco usa hash del fuente → se regenera sola.
+- [x] Confirmado en consola (log 014): pintura y reflejos correctos.
+
+### Prueba 3 — logs 007..014 (2026-10-01): asfalto negro y crash al salir — RESUELTOS
+- **Asfalto/texturas en negro** (y autos teñidos por ello): algunas texturas DXT
+  quedaban enteras en cero en la GPU aunque `glCompressedTexImage2D` recibía datos
+  válidos (misma fuente: tex 63 en cero, tex 64 bien). vitaGL swizzlea el nivel 0
+  con `sceGxmTransferCopy` asíncrono desde el pool temporal por frame; durante la
+  carga de pista (muchas texturas sin frames) llegaban tarde o pisadas, y el
+  `vgl_realloc` del nivel 1 podía mover el buffer con la copia en vuelo.
+  **Fix** en `vendor/vitaGL/source/utils/gpu_utils.c`: `sceGxmTransferFinish()`
+  antes de reasignar/liberar y swizzle de comprimidas en CPU
+  (`VGL_ASYNC_COMPRESSED_UPLOAD 0`). Aplica a todas las texturas (pista y autos).
+- **Crash/congelamiento al salir con CIRCLE** (dumps 0x0004fe239f, 0x0000852939):
+  `OnDestroy` → `JNIManager::JniCloseAll()` hace `DeleteGlobalRef` de los objetos
+  estáticos de `FuseOnInit` y de la JniTable; FalsoJNI les hace `free()` →
+  `_free_r`. **Fix** en `source/main.c`: `DeleteGlobalRef` propio (ignora los
+  placeholders; no-op durante `OnDestroy`), audio detenido antes de `OnDestroy`
+  (`reimpl/audio.c`: espera con timeout de 1 s). `OnDestroy` tarda ~7 s (el motor
+  libera recursos), luego sale limpio.
+- Nota: el motor tiñe cada auto con el color de colisión del suelo bajo las ruedas
+  (`CCarActor::Track` → `CCollision::Find`, datos crudos de la pista): en pistas de
+  atardecer los autos se ven azulados; la ruta de cálculo es del propio motor (sin
+  vitaGL ni loader de por medio). En consola (log 015) los autos salían azules o
+  negros según el tramo, y el tinte no coincide con los colores de vértice de la
+  misma pista (pista cálida R>B, tinte azul B≈2×R). **Opción `car_ground_tint`**
+  (`source/patch.c`, parchea 3 `ldr` en `CCarActor::Render` 0x133168/88/a4):
+  0 = sin tinte, 1 = original (por defecto), 2 = R/B invertidos.
+- **Autos verdes/rojos/azules/negros** (log 016, con el tinte ya desactivado):
+  bug de vitaGL en `ffp.c`: el color ambiente del material (glMaterial, sin
+  color array) se leía del VBO que había dejado el `glColorPointer` de la pista
+  → 4 floats basura; con luz ambiente 1.0 dominaba el color. **Fix**: los
+  atributos de material constantes no se leen de un VBO viejo (3 sitios).
+  - [x] Confirmado en consola: colores reales de los autos.
+
+### v1.1.0 (2026-10-01): remapeo de controles
+- Menú "PS Vita controls" con START + SELECT (`source/vita_menu.c`, dibujo en
+  `source/overlay.c` con la fuente 8x8 del PSPSDK porque el motor no expone texto):
+  acciones remapeables, dirección stick/acelerómetro, sensibilidad, invertir, tinte.
+  Juego congelado mientras está abierto: no se corren frames del motor,
+  `gettimeofday` descuenta el tiempo de pausa (`dynlib.c`) y el audio se silencia.
+  Al cerrar se restaura todo el estado GL tocado (P3DStateMan cachea estados).
+- `controls.txt` (formato de los ports Carnivores). START = BACK al soltar.
+
 - [x] Arranque: llega a "OnCreate returned." y "Entering main loop." (log 001) (si no: dump +
       `psvita-toolkit analyze`). Poner `engine_log 1` para ver el log del motor.
-- [ ] Imagen: menú visible y orientación correcta (si pantalla negra: revisar flags vitaGL).
+- [x] Imagen: menú visible y orientación correcta (log 002) (si pantalla negra: revisar flags vitaGL).
 - [ ] Texturas: formato elegido por el motor (PVRTC/ETC1/S3TC anunciados por vitaGL).
 - [ ] Audio: log "audio: SceAudioOut port ... up"; sonido sin cortes ni ruido.
 - [ ] Botones en menús (D-pad/Cruz/Círculo) y en carrera (acelerar/frenar/nitro).

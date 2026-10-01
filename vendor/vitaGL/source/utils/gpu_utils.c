@@ -546,6 +546,12 @@ static inline __attribute__((always_inline)) int gpu_get_compressed_mip_offset(i
 	return gpu_get_compressed_mipchain_size(level - 1, width, height, format);
 }
 
+// Raging Thunder 2 port (see VENDORED.md): compressed uploads are swizzled on
+// the CPU. The sceGxmTransferCopy fast path reads from the per-frame temp pool
+// and runs asynchronously; during a level load (many textures, no frame)
+// some DXT textures were still all zero when first drawn (black road).
+#define VGL_ASYNC_COMPRESSED_UPLOAD 0
+
 void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureFormat format, uint32_t image_size, const void *data, texture *tex, uint8_t src_bpp, GLboolean uncompressed, int index) {
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID && tex->faces_counter >= 6) {
@@ -593,7 +599,7 @@ void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureForm
 				case SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR:
 				case SCE_GXM_TEXTURE_FORMAT_UBC3_ABGR:
 				case SCE_GXM_TEXTURE_FORMAT_UBC5_GR:
-					if (aligned_width == w && aligned_height == h && h <= 2048 && w <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048 && w <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else
@@ -611,7 +617,7 @@ void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureForm
 					SwizzleTexDataETC1((uint8_t *)mip_data, (uint8_t *)data, 0, 0, ALIGNBLOCK(w, 4), ALIGNBLOCK(h, 4), ALIGNBLOCK(w, 4), ALIGNBLOCK(MIN(aligned_width, aligned_height), 4));
 					break;
 				case SCE_GXM_TEXTURE_FORMAT_PVRTII2BPP_ABGR:
-					if (aligned_width == w && aligned_height == h && h <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else
@@ -626,7 +632,7 @@ void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureForm
 					}
 					break;
 				default:
-					if (aligned_width == w && aligned_height == h && h <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else
@@ -661,6 +667,14 @@ void gpu_alloc_compressed_cube_texture(uint32_t w, uint32_t h, SceGxmTextureForm
 }
 
 void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, SceGxmTextureFormat format, uint32_t image_size, const void *data, texture *tex, uint8_t src_bpp, GLboolean uncompressed) {
+	// Raging Thunder 2 port (see VENDORED.md): the swizzle of the previous level
+	// is an asynchronous sceGxmTransferCopy into tex->data. Wait for it before
+	// tex->data is reallocated (next mip level) or freed, or vgl_realloc() can
+	// move the buffer while level 0 is still in flight and the texture ends up
+	// all zero (black road textures, at random depending on heap layout).
+	if (mip_level || tex->status == TEX_VALID)
+		sceGxmTransferFinish();
+
 	// If there's already a texture in passed texture object we first dealloc it
 	if (tex->status == TEX_VALID && !mip_level)
 		gpu_free_texture_data(tex);
@@ -737,7 +751,7 @@ void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, Sce
 				case SCE_GXM_TEXTURE_FORMAT_UBC2_ABGR:
 				case SCE_GXM_TEXTURE_FORMAT_UBC3_ABGR:
 				case SCE_GXM_TEXTURE_FORMAT_UBC5_GR:
-					if (aligned_width == w && aligned_height == h && h <= 2048 && w <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048 && w <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else
@@ -755,7 +769,7 @@ void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, Sce
 					SwizzleTexDataETC1((uint8_t *)mip_data, (uint8_t *)data, 0, 0, ALIGNBLOCK(w, 4), ALIGNBLOCK(h, 4), ALIGNBLOCK(w, 4), ALIGNBLOCK(MIN(aligned_width, aligned_height), 4));
 					break;
 				case SCE_GXM_TEXTURE_FORMAT_PVRTII2BPP_ABGR:
-					if (aligned_width == w && aligned_height == h && h <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else
@@ -770,7 +784,7 @@ void gpu_alloc_compressed_texture(int32_t mip_level, uint32_t w, uint32_t h, Sce
 					}
 					break;
 				default:
-					if (aligned_width == w && aligned_height == h && h <= 2048) {
+					if (VGL_ASYNC_COMPRESSED_UPLOAD && aligned_width == w && aligned_height == h && h <= 2048) {
 #ifdef TEXTURE_UPLOADS_SPEEDHACK
 						void *mapped_src = data;
 #else

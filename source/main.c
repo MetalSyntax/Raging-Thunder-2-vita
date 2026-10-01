@@ -45,6 +45,7 @@
 #include "utils/settings.h"
 
 #include "input.h"
+#include "vita_menu.h"
 #include "java.h"
 #include "reimpl/audio.h"
 
@@ -173,6 +174,27 @@ static void *GetDirectBufferAddress_soloader(JNIEnv *env, jobject buf) {
     return (void *) buf;
 }
 
+// FuseOnInit() receives the six Java objects above as static placeholders, and
+// on exit JNIManager::JniCloseAll() (from OnDestroy) DeleteGlobalRef()s them.
+// FalsoJNI's DeleteGlobalRef() free()s its argument: on a static address that
+// corrupts the heap and the process dies inside _free_r (crash dump
+// 0x0004fe239f, CIRCLE in the main menu). Skip anything that is not ours to free.
+// JniCloseAll() also releases the JniTable class/method references, which are
+// not plain heap blocks either (crash dump 0x0000852939, JniCloseAll+0x100).
+// The process exits right after OnDestroy, so during it nothing is freed.
+static void (*DeleteGlobalRef_falso)(JNIEnv *env, jobject obj);
+static int jni_exiting = 0;
+
+static void DeleteGlobalRef_soloader(JNIEnv *env, jobject obj) {
+    if (jni_exiting)
+        return;
+    if (obj == (jobject) &activity_placeholder || obj == (jobject) &maintask_placeholder ||
+        obj == (jobject) &sensor_placeholder || obj == (jobject) &utils_placeholder ||
+        obj == (jobject) &audio_placeholder || obj == (jobject) &egl_placeholder)
+        return;
+    DeleteGlobalRef_falso(env, obj);
+}
+
 extern struct JNINativeInterface *_jni; // FalsoJNI.c
 
 /* --- main ------------------------------------------------------------------- */
@@ -181,6 +203,8 @@ int main() {
     soloader_init_all();
 
     _jni->GetDirectBufferAddress = (void *) GetDirectBufferAddress_soloader;
+    DeleteGlobalRef_falso = (void *) _jni->DeleteGlobalRef;
+    _jni->DeleteGlobalRef = (void *) DeleteGlobalRef_soloader;
 
     int (*JNI_OnLoad)(void *jvm) = sym("JNI_OnLoad");
     FuseOnInit_fn FuseOnInit = sym("Java_com_polarbit_fuse_MainTask_FuseOnInit");
@@ -232,6 +256,14 @@ int main() {
     unsigned frames = 0;
 
     while (1) {
+        // Port menu (START + SELECT): the game is frozen, only the menu runs.
+        if (vita_menu_frozen()) {
+            input_update();
+            if (vita_menu_frozen())
+                vita_menu_render();
+            continue;
+        }
+
         if (java_dialog_active()) {
             java_dialog_update();
         } else {
@@ -241,6 +273,7 @@ int main() {
 
         if (OnEvent(&jni, NULL, 0, 1, 0, 0, 0) == 0) {
             l_info("Engine requested exit.");
+            log_flush();
             break;
         }
 
@@ -255,10 +288,17 @@ int main() {
         }
     }
 
+    // Stop the pump thread first: it calls Jni.AudioMix() into the engine,
+    // which must not run while onLeave/OnDestroy tear the mixer down.
+    audio_shutdown();
+    l_info("Audio stopped.");
+    log_flush();
+
     // MainTask.onLeave()
     OnEvent(&jni, NULL, 0, 0, 0, 0, 0);
+    jni_exiting = 1;
     OnDestroy(&jni, NULL);
-    audio_shutdown();
+    l_info("OnDestroy returned, exiting.");
     log_flush();
 
     sceKernelExitProcess(0);

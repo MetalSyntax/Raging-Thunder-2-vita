@@ -1,0 +1,36 @@
+Raging Thunder 2 - PS Vita (port Android, soloader)
+====================================================
+
+Requisitos en la consola
+- HENkaku/Enso con kubridge.skprx instalado (tai config).
+- ur0:data/libshacccg.suprx (ShaRKBR33D).
+
+Instalación
+1. Instalar ragingthunder2.vpk con VitaShell.
+2. Del APK original "Raging Thunder 2 V1.0.16.apk" (no se distribuye):
+   - lib/armeabi/librthunder2lite.so  ->  ux0:data/ragingthunder2/main.so
+   - assets/Data.vfs                  ->  ux0:data/ragingthunder2/assets/Data.vfs
+   - assets/moregames/                ->  ux0:data/ragingthunder2/assets/moregames/
+3. Abrir el juego. Las carpetas logs/ y saves/ se crean solas.
+
+Controles (por defecto, se pueden remapear)
+- Cruz            : acelerar / OK     - Cuadrado     : frenar / reversa
+- R / L           : acelerar / frenar (cambio de página en los menús)
+- Triángulo       : nitro / acción    - Círculo / Start : atrás / pausa
+- Cruceta         : menús             - Stick izquierdo : dirección (inclinación emulada)
+- Pantalla táctil : menús y HUD
+- START + SELECT  : menú "PS Vita controls" (el juego se pausa)
+    Cruz: cambiar botón   Cuadrado: agregar otro   Triángulo: borrar
+    Izq/Der: dirección (stick / acelerómetro), sensibilidad, invertir, tinte
+    Círculo / Start: guardar y cerrar
+  También se editan a mano en ux0:data/ragingthunder2/controls.txt
+  (ACCION = BOTON, BOTON ...). Start siempre es atrás/pausa.
+
+Ajustes: ux0:data/ragingthunder2/config.txt (se crea en el primer arranque)
+  language 0..6 (0 = sistema)   steering 0 stick / 1 acelerómetro de la Vita
+  steer_sensitivity 25..400     invert_steering 0/1   show_fps 0/1
+  msaa 0/1/2 (off/2x/4x)        engine_log 0/1        vfp_float 0/1   xperia_pad 0/1
+  car_ground_tint 0/1/2  tinte del suelo en los autos (0 apagado, 1 original,
+                         2 original con rojo/azul invertidos)
+
+Logs: ux0:data/ragingthunder2/logs/ragingthunder2_NNN.log

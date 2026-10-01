@@ -40,6 +40,7 @@
 #include "utils/glutil.h"
 #include "utils/utils.h"
 #include "utils/logger.h"
+#include "vita_menu.h"
 
 #ifdef USE_SCELIBC_IO
 #include <libc_bridge/libc_bridge.h>
@@ -247,6 +248,20 @@ static void glLightf_soloader(GLenum light, GLenum pname, GLfloat param) {
 static void glLightx_soloader(GLenum light, GLenum pname, GLfixed param) {
     GLfloat f = param / 65536.0f;
     glLightfv(light, pname, &f);
+}
+
+// The engine times its frames with gettimeofday(). While the port menu is
+// open the game is frozen; the time spent in it is taken out of the clock so
+// the race doesn't jump forward when the menu closes.
+static int gettimeofday_soloader(struct timeval *tv, void *tz) {
+    int ret = gettimeofday(tv, tz);
+    uint64_t paused = vita_menu_paused_us();
+    if (ret == 0 && tv && paused) {
+        uint64_t us = (uint64_t) tv->tv_sec * 1000000ull + tv->tv_usec - paused;
+        tv->tv_sec = (time_t) (us / 1000000ull);
+        tv->tv_usec = (suseconds_t) (us % 1000000ull);
+    }
+    return ret;
 }
 
 // newlib has getaddrinfo() but no gai_strerror(). The engine only uses it to
@@ -1115,7 +1130,7 @@ so_default_dynlib default_dynlib[] = {
         { "clock_getres", (uintptr_t)&clock_getres_soloader },
         { "clock_gettime", (uintptr_t)&clock_gettime_soloader },
         { "difftime", (uintptr_t)&difftime },
-        { "gettimeofday", (uintptr_t)&gettimeofday },
+        { "gettimeofday", (uintptr_t)&gettimeofday_soloader },
         { "gmtime", (uintptr_t)&gmtime },
         { "gmtime64", (uintptr_t)&gmtime64 },
         { "gmtime_r", (uintptr_t)&gmtime_r },
