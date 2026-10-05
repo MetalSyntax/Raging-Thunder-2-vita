@@ -35,7 +35,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "Raging Thunder 2")
 set(VITA_TITLEID "PSVRT0002")
 set(VITA_VPKNAME "ragingthunder2")
-set(VITA_VERSION "01.01")
+set(VITA_VERSION "01.11")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 
 # Optional: used for "send" and "dump" targets

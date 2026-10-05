@@ -32,8 +32,6 @@ void vita_menu_open(void);
 void vita_menu_update(uint32_t held, uint32_t pressed);
 /** Draw the menu on top of the frozen frame and present it. */
 void vita_menu_render(void);
-/** Called right before every swap: grabs the background frame once. */
-void vita_menu_on_swap(void);
 /** Total time the menu has been open (us), subtracted from the engine clock. */
 uint64_t vita_menu_paused_us(void);
 

@@ -156,6 +156,20 @@ Commit inicial `885e2ba`. Reporte del usuario: **colores de los autos con el ton
   atributos de material constantes no se leen de un VBO viejo (3 sitios).
   - [x] Confirmado en consola: colores reales de los autos.
 
+### v1.1.1 (2026-10-04): carga del perfil y menú START + SELECT
+- **"Failed to load profile, file is either corrupt or wrong version"**: el
+  `stat64_bionic` de `reimpl/io.h` era packed con tipos de 16 bits de newlib →
+  `st_size` en 0x26; `PFile::Size()` lo lee en 0x30 (`ldr r0, [sp, #0x30]` tras
+  `fstat`). Size 0 → `CStreamReader::EndOfStream` antes de la cabecera `RT2S` →
+  `CSaveManager::LoadProfile` devolvía 4 → popup. Fix: layout bionic ARM real con
+  `_Static_assert`. - [x] Confirmado en consola.
+- **Menú START + SELECT invisible**: (1) `vglInitExtended(0, ...)` deja sin pool el
+  modo inmediato de vitaGL (`legacy_pool_ptr` NULL); (2) el congelado esperaba el
+  próximo swap del motor y nunca llegaba (logs 020-022: "open" sin "frozen").
+  Fix: se congela al abrir y `overlay.c` dibuja por CPU directo en el framebuffer
+  en pantalla (`sceDisplayGetFrameBuf` tras `glFinish` + `sceGxmDisplayQueueFinish`),
+  sin tocar el estado GL del motor. - [x] Confirmado en consola.
+
 ### v1.1.0 (2026-10-01): remapeo de controles
 - Menú "PS Vita controls" con START + SELECT (`source/vita_menu.c`, dibujo en
   `source/overlay.c` con la fuente 8x8 del PSPSDK porque el motor no expone texto):
@@ -175,7 +189,7 @@ Commit inicial `885e2ba`. Reporte del usuario: **colores de los autos con el ton
 - [ ] Dirección: modo inclinación con stick (signo → `invert_steering`), y `steering 1`
       con el acelerómetro real (convención de signos de SceMotion sin verificar).
 - [ ] `xperia_pad 1` (por defecto): confirmar que el HUD no exige táctil; si molesta, probar 0.
-- [ ] Guardado: partida/progreso persiste en `saves/` tras reiniciar.
+- [x] Guardado: partida/progreso persiste en `saves/` tras reiniciar (v1.1.1).
 - [ ] Teclado (InputDialog → IME) al ingresar nombre, si el juego lo pide.
 - [ ] Red: News/PMultiplayer intentan sockets sin `sceNetInit`; confirmar que no cuelga.
 - [ ] Salir desde el menú del juego cierra la app limpio.

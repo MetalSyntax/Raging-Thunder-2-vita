@@ -8,6 +8,13 @@
 /**
  * @file  overlay.c
  * @brief 2D overlay for the port menu (see overlay.h).
+ *
+ * Drawn on the CPU straight into the framebuffer on screen, without vitaGL.
+ * While the menu is open no engine frame runs and nothing is swapped, so once
+ * the GPU and the display queue are idle the last game frame stays on screen
+ * and can be read (background) and overwritten (menu). On close the engine's
+ * next vglSwapBuffers() flips to one of its other buffers. No GL state is
+ * touched (the engine caches it in fuseGL::P3DStateMan).
  */
 
 #include "overlay.h"
@@ -16,197 +23,141 @@
 #include "utils/logger.h"
 
 #include <vitaGL.h>
+#include <psp2/display.h>
+#include <psp2/gxm.h>
 
 #include <stdlib.h>
 #include <string.h>
 
-#define FONT_TEX 128 // 16x16 glyphs of 8x8
+static uint32_t *frame_bg;      // last game frame, A8B8G8R8
+static uint32_t *dim_bg;        // frame_bg with the dim colour applied
+static uint32_t dim_color;
+static uint32_t *canvas;        // menu being drawn
+static uint32_t *shown;         // what is on screen now
+static SceDisplayFrameBuf fb;
+static int need_grab, frame_valid, fb_valid;
 
-static GLuint font_tex, frame_tex;
-static int frame_valid;
-static uint8_t *frame_buf;
-
-/* --- saved engine state ----------------------------------------------------- */
-
-static struct {
-    GLint active_tex, bound_tex0, bound_tex1, blend_src, blend_dst, depth_mask;
-    GLint viewport[4], env_mode;
-    GLfloat color[4];
-    GLboolean tex2d_0, tex2d_1, blend, depth, cull, lighting, fog, alpha, scissor;
-} st;
-
-static void set_enabled(GLenum cap, GLboolean on) {
-    if (on)
-        glEnable(cap);
-    else
-        glDisable(cap);
-}
-
-static void bind_unit(GLenum unit) {
-    glActiveTexture(unit);
-}
-
-/* --- textures --------------------------------------------------------------- */
-
-static void ensure_font(void) {
-    if (font_tex)
-        return;
-    uint8_t *px = calloc(FONT_TEX * FONT_TEX, 4);
-    if (!px)
-        return;
-    for (int c = 0; c < 256; c++) {
-        int cx = (c % 16) * 8, cy = (c / 16) * 8;
-        for (int row = 0; row < 8; row++) {
-            uint8_t bits = font8x8[c * 8 + row];
-            for (int col = 0; col < 8; col++) {
-                uint8_t *p = px + ((cy + row) * FONT_TEX + cx + col) * 4;
-                p[0] = p[1] = p[2] = 0xff;
-                p[3] = (bits & (0x80 >> col)) ? 0xff : 0x00;
-            }
-        }
-    }
-    glGenTextures(1, &font_tex);
-    glBindTexture(GL_TEXTURE_2D, font_tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FONT_TEX, FONT_TEX, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    free(px);
-}
+/* --- frame grab ------------------------------------------------------------- */
 
 void overlay_capture_frame(void) {
-    if (!frame_buf)
-        frame_buf = malloc(OVL_W * OVL_H * 4);
-    if (!frame_buf)
-        return;
-    glReadPixels(0, 0, OVL_W, OVL_H, GL_RGBA, GL_UNSIGNED_BYTE, frame_buf);
-
-    GLint active, bound;
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
-    bind_unit(GL_TEXTURE0);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
-    if (!frame_tex)
-        glGenTextures(1, &frame_tex);
-    glBindTexture(GL_TEXTURE_2D, frame_tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, OVL_W, OVL_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame_buf);
-    glBindTexture(GL_TEXTURE_2D, bound);
-    bind_unit(active);
-    frame_valid = 1;
+    need_grab = 1;
 }
 
 int overlay_has_frame(void) {
     return frame_valid;
 }
 
+static void grab_frame(void) {
+    need_grab = 0;
+    frame_valid = 0;
+    fb_valid = 0;
+    dim_color = 0;
+
+    // Let the GPU finish and every queued flip reach the screen.
+    glFinish();
+    sceGxmDisplayQueueFinish();
+    sceDisplayWaitVblankStart();
+
+    memset(&fb, 0, sizeof(fb));
+    fb.size = sizeof(fb);
+    int ret = sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+    if (ret < 0 || !fb.base ||
+        fb.width < OVL_W || fb.height < OVL_H || fb.pitch < OVL_W ||
+        fb.pixelformat != SCE_DISPLAY_PIXELFORMAT_A8B8G8R8) {
+        l_error("overlay: no usable framebuffer (0x%x: base %p, %ux%u, pitch %u, format 0x%x)",
+                ret, fb.base, fb.width, fb.height, fb.pitch, fb.pixelformat);
+        log_flush();
+        return;
+    }
+    fb_valid = 1;
+
+    if (!frame_bg) frame_bg = malloc(OVL_W * OVL_H * 4);
+    if (!dim_bg)   dim_bg   = malloc(OVL_W * OVL_H * 4);
+    if (!canvas)   canvas   = malloc(OVL_W * OVL_H * 4);
+    if (!shown)    shown    = malloc(OVL_W * OVL_H * 4);
+    if (!frame_bg || !dim_bg || !canvas || !shown) {
+        l_error("overlay: out of memory");
+        log_flush();
+        fb_valid = 0;
+        return;
+    }
+
+    const uint32_t *src = fb.base;
+    for (int y = 0; y < OVL_H; y++)
+        memcpy(frame_bg + y * OVL_W, src + y * fb.pitch, OVL_W * 4);
+    memcpy(shown, frame_bg, OVL_W * OVL_H * 4);
+    frame_valid = 1;
+}
+
+/* --- pixels ----------------------------------------------------------------- */
+
+// x / 255 for x in [0, 255 * 255], without a division.
+static inline uint32_t div255(uint32_t x) {
+    x += 128;
+    return (x + (x >> 8)) >> 8;
+}
+
+// 0xAARRGGBB over an A8B8G8R8 pixel.
+static inline uint32_t blend(uint32_t dst, uint32_t c) {
+    uint32_t a = c >> 24;
+    uint32_t r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+    if (a == 0xff)
+        return 0xff000000 | (b << 16) | (g << 8) | r;
+    uint32_t ia = 255 - a;
+    uint32_t dr = dst & 0xff, dg = (dst >> 8) & 0xff, db = (dst >> 16) & 0xff;
+    dr = div255(r * a + dr * ia);
+    dg = div255(g * a + dg * ia);
+    db = div255(b * a + db * ia);
+    return 0xff000000 | (db << 16) | (dg << 8) | dr;
+}
+
+static inline int px(float v, int max) {
+    int i = (int) (v + 0.5f);
+    return i < 0 ? 0 : (i > max ? max : i);
+}
+
 /* --- begin / end ------------------------------------------------------------ */
 
 void overlay_begin(void) {
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &st.active_tex);
-    bind_unit(GL_TEXTURE1);
-    st.tex2d_1 = glIsEnabled(GL_TEXTURE_2D);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &st.bound_tex1);
-    glDisable(GL_TEXTURE_2D);
-    glMatrixMode(GL_TEXTURE);
-    glPushMatrix();
-    glLoadIdentity();
-    bind_unit(GL_TEXTURE0);
-    st.tex2d_0 = glIsEnabled(GL_TEXTURE_2D);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &st.bound_tex0);
-    glGetTexEnviv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, &st.env_mode);
-    glMatrixMode(GL_TEXTURE);
-    glPushMatrix();
-    glLoadIdentity();
-
-    st.blend = glIsEnabled(GL_BLEND);
-    st.depth = glIsEnabled(GL_DEPTH_TEST);
-    st.cull = glIsEnabled(GL_CULL_FACE);
-    st.lighting = glIsEnabled(GL_LIGHTING);
-    st.fog = glIsEnabled(GL_FOG);
-    st.alpha = glIsEnabled(GL_ALPHA_TEST);
-    st.scissor = glIsEnabled(GL_SCISSOR_TEST);
-    glGetIntegerv(GL_BLEND_SRC, &st.blend_src);
-    glGetIntegerv(GL_BLEND_DST, &st.blend_dst);
-    glGetIntegerv(GL_DEPTH_WRITEMASK, &st.depth_mask);
-    glGetIntegerv(GL_VIEWPORT, st.viewport);
-    glGetFloatv(GL_CURRENT_COLOR, st.color);
-
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glOrthof(0.0f, OVL_W, OVL_H, 0.0f, -1.0f, 1.0f);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-
-    glViewport(0, 0, OVL_W, OVL_H);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_FOG);
-    glDisable(GL_ALPHA_TEST);
-    glDisable(GL_SCISSOR_TEST);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-    ensure_font();
+    if (need_grab)
+        grab_frame();
 }
 
 void overlay_end(void) {
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-
-    bind_unit(GL_TEXTURE0);
-    glMatrixMode(GL_TEXTURE);
-    glPopMatrix();
-    glBindTexture(GL_TEXTURE_2D, st.bound_tex0);
-    set_enabled(GL_TEXTURE_2D, st.tex2d_0);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, st.env_mode);
-    bind_unit(GL_TEXTURE1);
-    glMatrixMode(GL_TEXTURE);
-    glPopMatrix();
-    glBindTexture(GL_TEXTURE_2D, st.bound_tex1);
-    set_enabled(GL_TEXTURE_2D, st.tex2d_1);
-    bind_unit(st.active_tex);
-    glMatrixMode(GL_MODELVIEW);
-
-    set_enabled(GL_BLEND, st.blend);
-    set_enabled(GL_DEPTH_TEST, st.depth);
-    set_enabled(GL_CULL_FACE, st.cull);
-    set_enabled(GL_LIGHTING, st.lighting);
-    set_enabled(GL_FOG, st.fog);
-    set_enabled(GL_ALPHA_TEST, st.alpha);
-    set_enabled(GL_SCISSOR_TEST, st.scissor);
-    glBlendFunc(st.blend_src, st.blend_dst);
-    glDepthMask(st.depth_mask ? GL_TRUE : GL_FALSE);
-    glViewport(st.viewport[0], st.viewport[1], st.viewport[2], st.viewport[3]);
-    glColor4f(st.color[0], st.color[1], st.color[2], st.color[3]);
+    if (fb_valid && memcmp(canvas, shown, OVL_W * OVL_H * 4) != 0) {
+        sceDisplayWaitVblankStart();
+        uint32_t *dst = fb.base;
+        for (int y = 0; y < OVL_H; y++)
+            memcpy(dst + y * fb.pitch, canvas + y * OVL_W, OVL_W * 4);
+        memcpy(shown, canvas, OVL_W * OVL_H * 4);
+    } else {
+        sceDisplayWaitVblankStart(); // the menu loop has no swap to pace it
+    }
 }
 
 /* --- primitives ------------------------------------------------------------- */
 
-static void color(uint32_t c) {
-    glColor4f(((c >> 16) & 0xff) / 255.0f, ((c >> 8) & 0xff) / 255.0f,
-              (c & 0xff) / 255.0f, ((c >> 24) & 0xff) / 255.0f);
+void overlay_background(uint32_t dim) {
+    if (!fb_valid)
+        return;
+    if (dim != dim_color) {
+        for (int i = 0; i < OVL_W * OVL_H; i++)
+            dim_bg[i] = blend(frame_bg[i], dim);
+        dim_color = dim;
+    }
+    memcpy(canvas, dim_bg, OVL_W * OVL_H * 4);
 }
 
 void overlay_rect(float x0, float y0, float x1, float y1, uint32_t c) {
-    glDisable(GL_TEXTURE_2D);
-    color(c);
-    glBegin(GL_QUADS);
-    glVertex2f(x0, y0);
-    glVertex2f(x1, y0);
-    glVertex2f(x1, y1);
-    glVertex2f(x0, y1);
-    glEnd();
+    if (!fb_valid)
+        return;
+    int ix0 = px(x0, OVL_W), ix1 = px(x1, OVL_W);
+    int iy0 = px(y0, OVL_H), iy1 = px(y1, OVL_H);
+    for (int y = iy0; y < iy1; y++) {
+        uint32_t *row = canvas + y * OVL_W;
+        for (int x = ix0; x < ix1; x++)
+            row[x] = blend(row[x], c);
+    }
 }
 
 void overlay_frame(float x0, float y0, float x1, float y1, float t, uint32_t c) {
@@ -216,45 +167,39 @@ void overlay_frame(float x0, float y0, float x1, float y1, float t, uint32_t c) 
     overlay_rect(x1 - t, y0, x1, y1, c);
 }
 
-void overlay_background(uint32_t dim) {
-    if (frame_valid) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, frame_tex);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        // glReadPixels rows are bottom-up.
-        glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(0.0f, 0.0f);
-        glTexCoord2f(1.0f, 1.0f); glVertex2f(OVL_W, 0.0f);
-        glTexCoord2f(1.0f, 0.0f); glVertex2f(OVL_W, OVL_H);
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(0.0f, OVL_H);
-        glEnd();
-    } else {
-        overlay_rect(0.0f, 0.0f, OVL_W, OVL_H, 0xff000000);
-    }
-    overlay_rect(0.0f, 0.0f, OVL_W, OVL_H, dim);
-}
-
 float overlay_text_width(const char *s, float scale) {
     return strlen(s) * OVL_GLYPH * scale;
 }
 
 void overlay_text(float x, float y, float scale, uint32_t c, const char *s) {
-    if (!font_tex)
+    if (!fb_valid)
         return;
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, font_tex);
-    color(c);
-    const float g = OVL_GLYPH * scale, u = 8.0f / FONT_TEX;
-    glBegin(GL_QUADS);
+    const float g = OVL_GLYPH * scale;
+    int gs = (int) (g + 0.5f);
+    if (gs < 1)
+        return;
+    int iy = (int) (y + 0.5f);
     for (; *s; s++, x += g) {
         unsigned ch = (unsigned char) *s;
         if (ch == ' ')
             continue;
-        float s0 = (ch % 16) * u, t0 = (ch / 16) * u;
-        glTexCoord2f(s0, t0);         glVertex2f(x, y);
-        glTexCoord2f(s0 + u, t0);     glVertex2f(x + g, y);
-        glTexCoord2f(s0 + u, t0 + u); glVertex2f(x + g, y + g);
-        glTexCoord2f(s0, t0 + u);     glVertex2f(x, y + g);
+        const uint8_t *glyph = &font8x8[ch * 8];
+        int ix = (int) (x + 0.5f);
+        for (int py = 0; py < gs; py++) {
+            int ty = iy + py;
+            if (ty < 0 || ty >= OVL_H)
+                continue;
+            uint8_t bits = glyph[py * 8 / gs];
+            if (!bits)
+                continue;
+            uint32_t *row = canvas + ty * OVL_W;
+            for (int pxl = 0; pxl < gs; pxl++) {
+                int tx = ix + pxl;
+                if (tx < 0 || tx >= OVL_W)
+                    continue;
+                if (bits & (0x80 >> (pxl * 8 / gs)))
+                    row[tx] = blend(row[tx], c);
+            }
+        }
     }
-    glEnd();
 }

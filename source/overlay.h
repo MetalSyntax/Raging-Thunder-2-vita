@@ -8,11 +8,10 @@
 /**
  * @file  overlay.h
  * @brief Minimal 2D drawing on top of the game (port menu): rectangles and
- *        8x8 bitmap text through vitaGL immediate mode, plus a frozen copy of
- *        the last game frame used as the menu background.
- *
- * The Polarbit engine caches GL state (fuseGL::P3DStateMan), so everything
- * overlay_begin() changes is restored by overlay_end().
+ *        8x8 bitmap text drawn on the CPU into the framebuffer on screen, over
+ *        a dimmed copy of the last game frame. No GL calls: the engine caches
+ *        GL state (fuseGL::P3DStateMan) and nothing is swapped while the menu
+ *        is open.
  */
 
 #ifndef SOLOADER_OVERLAY_H
@@ -30,11 +29,13 @@ extern "C" {
 /** Glyph cell size at scale 1 (pixels). */
 #define OVL_GLYPH 8
 
-/** Copy the frame about to be presented (call right before the swap). */
+/** Grab the frame about to be presented on the next overlay_begin() (call
+ *  right before the swap). */
 void overlay_capture_frame(void);
 int  overlay_has_frame(void);
 
 void overlay_begin(void);
+/** Puts the menu on screen (only if it changed) and waits for vblank. */
 void overlay_end(void);
 
 /** Colours are 0xAARRGGBB. Coordinates: pixels, origin top-left. */

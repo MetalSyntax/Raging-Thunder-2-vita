@@ -13,7 +13,6 @@
 #include "utils/dialog.h"
 #include "utils/logger.h"
 #include "utils/settings.h"
-#include "vita_menu.h"
 
 #include <stdio.h>
 #include <malloc.h>
@@ -48,11 +47,6 @@ void gl_init() {
 }
 
 void gl_swap() {
-    vita_menu_on_swap(); // grabs the port menu background once
-    vglSwapBuffers(GL_FALSE);
-}
-
-void gl_swap_raw() {
     vglSwapBuffers(GL_FALSE);
 }
 

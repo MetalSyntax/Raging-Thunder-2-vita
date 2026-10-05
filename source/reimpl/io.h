@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/dirent.h>
 #include <sys/syslimits.h>
@@ -40,24 +41,35 @@ extern "C" {
 #define DT_WHT 14
 #endif
 
-typedef struct __attribute__((__packed__)) stat64_bionic {
-    unsigned long long st_dev;
-    unsigned char __pad0[4];
-    unsigned long __st_ino;
-    unsigned int st_mode;
-    nlink_t st_nlink;
-    uid_t st_uid;
-    gid_t st_gid;
-    unsigned long long st_rdev;
-    unsigned char __pad3[4];
-    long long st_size;
-    unsigned long st_blksize;
-    unsigned long long st_blocks;
-    struct timespec st_atim;
-    struct timespec st_mtim;
-    struct timespec st_ctim;
-    unsigned long long st_ino;
+/*
+ * bionic's 32-bit ARM struct stat (== struct stat64), naturally aligned, 0x68
+ * bytes. Fixed-width types only: newlib's nlink_t/uid_t/gid_t are 16-bit and
+ * its timespec has a 64-bit time_t, and the old packed copy of this struct put
+ * st_size at 0x26. PFile::Size() reads it at 0x30 (ldr r0, [sp, #0x30] after
+ * fstat), so every save file looked empty: CStreamReader hit EndOfStream before
+ * the header and LoadProfile failed with "corrupt or wrong version".
+ */
+typedef struct stat64_bionic {
+    uint64_t st_dev;            // 0x00
+    uint8_t  __pad0[4];         // 0x08
+    uint32_t __st_ino;          // 0x0c
+    uint32_t st_mode;           // 0x10
+    uint32_t st_nlink;          // 0x14
+    uint32_t st_uid;            // 0x18
+    uint32_t st_gid;            // 0x1c
+    uint64_t st_rdev;           // 0x20
+    uint8_t  __pad3[4];         // 0x28
+    int64_t  st_size;           // 0x30
+    uint32_t st_blksize;        // 0x38
+    uint64_t st_blocks;         // 0x40
+    struct { int32_t tv_sec; int32_t tv_nsec; } st_atim, st_mtim, st_ctim; // 0x48
+    uint64_t st_ino;            // 0x60
 } stat64_bionic;
+
+#ifndef __cplusplus
+_Static_assert(__builtin_offsetof(stat64_bionic, st_size) == 0x30, "bionic stat layout");
+_Static_assert(sizeof(stat64_bionic) == 0x68, "bionic stat layout");
+#endif
 
 typedef struct __attribute__((__packed__)) dirent64_bionic {
     int16_t d_ino; // 2 bytes // offset 0x0

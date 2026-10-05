@@ -3,6 +3,25 @@
 All notable changes to this port are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] — 2026-10-04
+
+### Fixed
+
+- **"Failed to load profile, file is either corrupt or wrong version"** on every
+  boot after a save existed (Career progress lost, Career impossible to finish).
+  The save was written correctly but read back as empty: the loader's bionic
+  `struct stat` was packed with newlib's 16-bit types, so `st_size` sat at offset
+  0x26 instead of 0x30 where `PFile::Size()` reads it. `CStreamReader` hit
+  end-of-stream before the `RT2S` header and `LoadProfile` returned "wrong version".
+  The struct now matches bionic's ARM layout (checked at compile time).
+- **Start + Select menu never appeared** (the game paused, or kept running, with no
+  menu on screen). It waited for the engine's next frame to freeze the game and it
+  drew through vitaGL immediate mode, whose vertex pool was never allocated
+  (`vglInitExtended(0, ...)`). The game is now frozen as soon as the combo is
+  pressed and the menu is drawn on the CPU straight into the framebuffer on
+  screen, over a dimmed copy of the last frame, without touching the engine's GL
+  state.
+
 ## [1.1.0] — 2026-10-01
 
 ### Added

@@ -19,7 +19,7 @@
 #include "input.h"
 #include "overlay.h"
 #include "reimpl/audio.h"
-#include "utils/glutil.h"
+#include "utils/logger.h"
 #include "utils/settings.h"
 
 #include <psp2/ctrl.h>
@@ -101,20 +101,16 @@ void vita_menu_open(void) {
         return;
     build_rows();
     open = 1;
-    frozen = 0;     // one more engine frame, captured in vita_menu_on_swap()
+    // Frozen right away: no further engine frame runs, so what is on screen
+    // now is the background (overlay.c reads it back from the display).
+    frozen = 1;
+    overlay_capture_frame();
+    audio_set_muted(1);
     capture = 0;
     prev_dirs = SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT;
     if (sel < 0 || sel >= row_count)
         sel = 0;
     opened_at = sceKernelGetProcessTimeWide();
-    audio_set_muted(1);
-}
-
-void vita_menu_on_swap(void) {
-    if (open && !frozen) {
-        overlay_capture_frame();
-        frozen = 1;
-    }
 }
 
 static void close_menu(void) {
@@ -297,6 +293,13 @@ void vita_menu_render(void) {
         return;
 
     overlay_begin();
+    if (!overlay_has_frame()) {
+        // Nothing can be drawn: don't leave the game frozen behind an
+        // invisible menu.
+        l_error("vita_menu: overlay unavailable, closing");
+        close_menu();
+        return;
+    }
     overlay_background(COL_DIM);
 
     const float px0 = 40.0f, px1 = OVL_W - 40.0f, py0 = 14.0f, py1 = OVL_H - 14.0f;
@@ -347,5 +350,4 @@ void vita_menu_render(void) {
     text_center((px0 + px1) * 0.5f, py1 - 22.0f, 1.5f, COL_GREY, footer());
 
     overlay_end();
-    gl_swap_raw();
 }

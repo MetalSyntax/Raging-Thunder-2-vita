@@ -32,7 +32,7 @@ audio mixing, file access and LiveArea — so the game runs natively on the Vita
 - Rendering: vitaGL (vendored, softfp), MSAA up to 4x, 960×544.
 - Input: buttons, touch screen, left-stick tilt emulation and real motion controls.
 - Audio: engine mixer streamed through `SceAudioOut`.
-- Saves and settings stored under `ux0:data/ragingthunder2/`.
+- Saves (Career progress) and settings stored under `ux0:data/ragingthunder2/`.
 
 ## Requirements
 
@@ -81,7 +81,8 @@ emulates the accelerometer; choose *Tilt (motion)* in the controls menu (or set
 ### Remapping
 
 Press **Start + Select** at any time (menus or race) to open the **PS Vita controls**
-menu. The game is paused while it is open (clock frozen, audio muted).
+menu. The game is paused while it is open (clock frozen, audio muted) and the menu
+is drawn over a dimmed copy of the last frame.
 
 | In the menu | |
 |---|---|
@@ -146,6 +147,8 @@ This produces `eboot.bin` and `ragingthunder2.vpk`. vitaGL is vendored under
 ## Known issues
 
 - Online features (news / multiplayer) attempt raw sockets without `sceNetInit` — they fail gracefully but have no connectivity.
+- Career progress saved with v1.0.0 / v1.1.0 could not be loaded back ("Failed to
+  load profile"); fixed in v1.1.1, but progress from those versions may be lost.
 - Quitting from the main menu takes a few seconds (the engine releases its resources in `OnDestroy`).
 - Cars take a tint from the ground under them (darker in tunnels, cooler on dusk tracks),
   as the original game does; set `car_ground_tint 0` for the plain paint colors.
