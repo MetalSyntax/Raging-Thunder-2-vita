@@ -14,6 +14,8 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 add_custom_target(SceLibcBridge ALL
         COMMAND vita-libs-gen ${CMAKE_CURRENT_SOURCE_DIR}/nids.yml ${CMAKE_CURRENT_BINARY_DIR}/stubs
         COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/stubs
+        # Ninja needs to know who makes the stub the main target links against.
+        BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/stubs/libSceLibcBridge_stub.a
         COMMENT "Building stubs for SceLibcBridge"
 )
 

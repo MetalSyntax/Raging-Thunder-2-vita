@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <sys/socket.h>
 #include <psp2/kernel/threadmgr.h>
 
 #ifdef USE_SCELIBC_IO
@@ -110,6 +111,50 @@ void io_neg_cache_clear(void) {
     }
 }
 
+/* --- write buffer ------------------------------------------------------------
+ * The engine writes save files through PFile::Write -> write() a few bytes at
+ * a time (CGhostCar::Write: one write() per 4-byte field, tens of thousands per
+ * time attack ghost). Each one is a memory card sceIoWrite on Vita, so saving
+ * the ghost after a time attack race froze the game. Writes to the file last
+ * opened for writing are batched here and flushed on lseek/read/fstat/fsync/
+ * close or when another file is opened for writing.
+ * ponytail: one buffered fd, main thread only (all engine file I/O is there).
+ */
+static int wbuf_fd = -1;
+static int wbuf_len;
+static char wbuf[64 * 1024];
+
+static void wbuf_flush(int fd) {
+    if (fd != wbuf_fd || wbuf_len == 0)
+        return;
+    int ret = write(wbuf_fd, wbuf, wbuf_len);
+    if (ret != wbuf_len)
+        l_error("write(%i, %i bytes) failed: %i", wbuf_fd, wbuf_len, ret);
+    wbuf_len = 0;
+}
+
+ssize_t write_soloader(int fd, const void *buf, size_t count) {
+    if (fd != wbuf_fd || fd < 0)
+        return write(fd, buf, count);
+    if (wbuf_len + count > sizeof(wbuf))
+        wbuf_flush(fd);
+    if (count >= sizeof(wbuf))
+        return write(fd, buf, count);
+    memcpy(wbuf + wbuf_len, buf, count);
+    wbuf_len += count;
+    return count;
+}
+
+ssize_t read_soloader(int fd, void *buf, size_t count) {
+    wbuf_flush(fd);
+    return read(fd, buf, count);
+}
+
+off_t lseek_soloader(int fd, off_t offset, int whence) {
+    wbuf_flush(fd);
+    return lseek(fd, offset, whence);
+}
+
 static int open_cached(const char *path, int newlib_flags, mode_t mode) {
     int readonly = (newlib_flags & O_ACCMODE) == O_RDONLY &&
                    !(newlib_flags & (O_CREAT | O_TRUNC | O_APPEND));
@@ -155,6 +200,11 @@ int open_soloader(const char * path, int oflag, ...) {
         }
     }
 
+    if (ret >= 0 && (oflag & O_ACCMODE) != O_RDONLY) {
+        wbuf_flush(wbuf_fd);
+        wbuf_fd = ret;
+    }
+
     l_debug("open(%s, %x): %i", path, oflag, ret);
     return ret;
 }
@@ -180,6 +230,7 @@ int rmdir_soloader(const char *path) {
 }
 
 int fstat_soloader(int fd, stat64_bionic * buf) {
+    wbuf_flush(fd);
     struct stat st;
     int res = fstat(fd, &st);
 
@@ -213,6 +264,9 @@ int fclose_soloader(FILE * f) {
 }
 
 int close_soloader(int fd) {
+    wbuf_flush(fd);
+    if (fd == wbuf_fd)
+        wbuf_fd = -1;
     int ret = close(fd);
     l_debug("close(%i): %i", fd, ret);
     return ret;
@@ -264,9 +318,41 @@ int closedir_soloader(DIR * dir) {
     return ret;
 }
 
+#define BIONIC_F_GETFL     3
+#define BIONIC_F_SETFL     4
+#define BIONIC_O_RDWR      02
+#define BIONIC_O_NONBLOCK  04000
+
+// PBsdSockStream::SetBlocking() makes its sockets non-blocking with
+// fcntl(F_SETFL, flags | O_NONBLOCK) and then polls them every frame. A no-op
+// stub left them blocking: the first recv/connect with nothing to return hung
+// the main loop for good (freeze after finishing a time attack race).
+// Only sockets are handled; on anything else SO_NONBLOCK fails and F_GETFL
+// reports a plain read/write descriptor, as before.
 int fcntl_soloader(int fd, int cmd, ...) {
-    l_warn("fcntl(%i, %i, ...): not implemented", fd, cmd);
-    return 0;
+    va_list args;
+    va_start(args, cmd);
+    int arg = va_arg(args, int);
+    va_end(args);
+
+    int nb = 0;
+    socklen_t len = sizeof(nb);
+    switch (cmd) {
+        case BIONIC_F_GETFL:
+            if (getsockopt(fd, SOL_SOCKET, SO_NONBLOCK, &nb, &len) < 0)
+                nb = 0;
+            return BIONIC_O_RDWR | (nb ? BIONIC_O_NONBLOCK : 0);
+        case BIONIC_F_SETFL:
+            nb = (arg & BIONIC_O_NONBLOCK) ? 1 : 0;
+            if (setsockopt(fd, SOL_SOCKET, SO_NONBLOCK, &nb, sizeof(nb)) < 0)
+                l_warn("fcntl(%i, F_SETFL, 0x%x): not a socket, ignored", fd, arg);
+            else
+                l_info("fcntl(%i): socket %sblocking", fd, nb ? "non-" : "");
+            return 0;
+        default:
+            l_warn("fcntl(%i, %i, ...): not implemented", fd, cmd);
+            return 0;
+    }
 }
 
 int ioctl_soloader(int fd, int request, ...) {
@@ -275,6 +361,7 @@ int ioctl_soloader(int fd, int request, ...) {
 }
 
 int fsync_soloader(int fd) {
+    wbuf_flush(fd);
     int ret = fsync(fd);
     l_debug("fsync(%i): %i", fd, ret);
     return ret;

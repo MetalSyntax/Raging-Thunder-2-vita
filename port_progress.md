@@ -156,6 +156,24 @@ Commit inicial `885e2ba`. Reporte del usuario: **colores de los autos con el ton
   atributos de material constantes no se leen de un VBO viejo (3 sitios).
   - [x] Confirmado en consola: colores reales de los autos.
 
+### v1.1.2 (2026-11-13): congelado en Time Attack, tearing del menú
+- **Congelado al terminar una carrera Time Attack** (log 024, sin traza: el log
+  quedaba en buffer). `PBsdSockStream::SetBlocking` pone sus sockets en
+  no bloqueante con `fcntl(F_SETFL, flags | 0x800)` (O_NONBLOCK de bionic) y luego
+  los consulta cada frame; `fcntl_soloader` era un stub → sockets bloqueantes →
+  el primer `recv`/`connect` sin datos colgaba el bucle principal. Fix en
+  `reimpl/io.c`: F_GETFL/F_SETFL ↔ `SO_NONBLOCK`. - [x] Confirmado en consola.
+- `CGhostCar::Write` → un `write()` por cada campo de 4 bytes; buffer de 64 KB
+  para el último fd abierto en escritura (flush en lseek/read/fstat/fsync/close).
+- Tearing del menú START + SELECT: `overlay_end` copiaba 2 MB a la CDRAM en
+  pantalla; ahora solo las filas que cambian.
+- Watchdog (`main.c`): 30 s sin vuelta del bucle principal → `l_fatal` + crash
+  a propósito para obtener un psp2core con el PC del hilo principal.
+- Texto borroso: el motor fija `CVScreen` en 480x320 (`CApplication`, etapa
+  0x23c == 6) y escala ×2/×1.7 con GL_LINEAR; es así en Android. Sin cambio.
+- Build: BYPRODUCTS del stub de SceLibcBridge, `CMAKE_POLICY_VERSION_MINIMUM`,
+  `.gitignore` `/Makefile` (el rsync de psvita-toolkit no entiende `!`).
+
 ### v1.1.1 (2026-10-04): carga del perfil y menú START + SELECT
 - **"Failed to load profile, file is either corrupt or wrong version"**: el
   `stat64_bionic` de `reimpl/io.h` era packed con tipos de 16 bits de newlib →

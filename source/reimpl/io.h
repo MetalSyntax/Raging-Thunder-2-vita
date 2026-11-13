@@ -104,6 +104,12 @@ int readdir_r_soloader(DIR * dirp, dirent64_bionic * entry,
 
 int close_soloader(int fd);
 
+ssize_t write_soloader(int fd, const void *buf, size_t count);
+
+ssize_t read_soloader(int fd, void *buf, size_t count);
+
+off_t lseek_soloader(int fd, off_t offset, int whence);
+
 int fclose_soloader(FILE *f);
 
 int closedir_soloader(DIR *dir);

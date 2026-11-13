@@ -3,6 +3,34 @@
 All notable changes to this port are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.2] — 2026-11-13
+
+### Fixed
+
+- **Game froze after finishing a Time Attack race.** The engine's sockets
+  (`PBsdSockStream::SetBlocking`) are switched to non-blocking with
+  `fcntl(F_SETFL, O_NONBLOCK)` and then polled every frame; the loader's `fcntl`
+  was a no-op stub, so they stayed blocking and the first poll with nothing to
+  read hung the main loop. `fcntl` now maps `F_GETFL`/`F_SETFL` + `O_NONBLOCK`
+  to `SO_NONBLOCK` on sockets.
+- **Saving the Time Attack ghost was very slow**: `CGhostCar::Write` issues one
+  `write()` per 4-byte value (thousands per race), each a memory card write on
+  the Vita. Small writes to the file being saved are now buffered (64 KB).
+- **Tearing in the Start + Select menu**: it copied the whole 2 MB frame into the
+  framebuffer on screen, slower than one scanout. Only the changed rows are
+  copied now.
+
+### Added
+
+- Hang watchdog: if the main loop stops for 30 s, the error is logged and a
+  crash dump is written (`ux0:data/`) instead of leaving the console frozen.
+
+### Build
+
+- Builds out of the box with CMake 4 and Ninja (`SceLibcBridge` stub declared as
+  a byproduct, `CMAKE_POLICY_VERSION_MINIMUM 3.5`), and with `psvita-toolkit build`
+  (`.gitignore` no longer hides `vendor/vitaGL/Makefile` from its source copy).
+
 ## [1.1.1] — 2026-10-04
 
 ### Fixed

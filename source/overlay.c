@@ -124,14 +124,20 @@ void overlay_begin(void) {
 }
 
 void overlay_end(void) {
-    if (fb_valid && memcmp(canvas, shown, OVL_W * OVL_H * 4) != 0) {
-        sceDisplayWaitVblankStart();
-        uint32_t *dst = fb.base;
-        for (int y = 0; y < OVL_H; y++)
-            memcpy(dst + y * fb.pitch, canvas + y * OVL_W, OVL_W * 4);
-        memcpy(shown, canvas, OVL_W * OVL_H * 4);
-    } else {
-        sceDisplayWaitVblankStart(); // the menu loop has no swap to pace it
+    // The menu loop has no swap to pace it. The framebuffer is on screen
+    // (uncached CDRAM): copying all 2 MB takes longer than the scanout and
+    // tore on every change, so only the rows that changed are written, right
+    // after vblank and top-down, ahead of the beam.
+    sceDisplayWaitVblankStart();
+    if (!fb_valid)
+        return;
+    uint32_t *dst = fb.base;
+    for (int y = 0; y < OVL_H; y++) {
+        const uint32_t *row = canvas + y * OVL_W;
+        if (memcmp(row, shown + y * OVL_W, OVL_W * 4) != 0) {
+            memcpy(dst + y * fb.pitch, row, OVL_W * 4);
+            memcpy(shown + y * OVL_W, row, OVL_W * 4);
+        }
     }
 }
 

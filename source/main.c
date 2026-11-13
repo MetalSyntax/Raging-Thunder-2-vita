@@ -197,6 +197,32 @@ static void DeleteGlobalRef_soloader(JNIEnv *env, jobject obj) {
 
 extern struct JNINativeInterface *_jni; // FalsoJNI.c
 
+/* --- hang watchdog ---------------------------------------------------------- */
+
+// A hang inside an engine frame leaves no trace: the log is buffered and the
+// main loop never flushes again. If the loop stops turning for WATCHDOG_SEC,
+// log it and crash this thread on purpose: the psp2core dump has every
+// thread's registers, so the main thread's PC/LR show where it is stuck.
+#define WATCHDOG_SEC 30
+
+static volatile unsigned loop_ticks;
+
+static int watchdog_thread(SceSize args, void *argp) {
+    unsigned last = loop_ticks;
+    int idle = 0;
+    for (;;) {
+        sceKernelDelayThread(1000000);
+        if (loop_ticks != last) {
+            last = loop_ticks;
+            idle = 0;
+        } else if (++idle == WATCHDOG_SEC) {
+            l_fatal("watchdog: main loop stuck for %d s, forcing a crash dump", WATCHDOG_SEC);
+            *(volatile int *) 0 = 0;
+        }
+    }
+    return 0;
+}
+
 /* --- main ------------------------------------------------------------------- */
 
 int main() {
@@ -255,7 +281,13 @@ int main() {
     uint64_t fps_t0 = sceKernelGetProcessTimeWide();
     unsigned frames = 0;
 
+    SceUID wd = sceKernelCreateThread("hang_watchdog", watchdog_thread, 0x10000100, 0x4000, 0, 0, NULL);
+    if (wd >= 0)
+        sceKernelStartThread(wd, 0, NULL);
+
     while (1) {
+        loop_ticks++;
+
         // Port menu (START + SELECT): the game is frozen, only the menu runs.
         if (vita_menu_frozen()) {
             input_update();

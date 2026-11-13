@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
 
+# vita.cmake and lib/libc_bridge ask for CMake < 3.5, which CMake 4 rejects.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 if (NOT DEFINED ENV{VITASDK} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   message(FATAL_ERROR "Please define VITASDK env var to point to your SDK path or set CMAKE_TOOLCHAIN_FILE.")
 endif ()
@@ -35,7 +38,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "Raging Thunder 2")
 set(VITA_TITLEID "PSVRT0002")
 set(VITA_VPKNAME "ragingthunder2")
-set(VITA_VERSION "01.11")
+set(VITA_VERSION "01.12")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 
 # Optional: used for "send" and "dump" targets

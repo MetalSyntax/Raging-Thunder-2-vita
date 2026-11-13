@@ -28,7 +28,7 @@ assets/
 /build/
 CMakeCache.txt
 CMakeFiles/
-Makefile
+/Makefile
 cmake_install.cmake
 *.elf
 *.self
@@ -53,8 +53,8 @@ __pycache__/
 *.swp
 cmake-build-*/
 
-# vitaGL vendorizada: el Makefile SÍ se versiona; artefactos de build no
-!/vendor/vitaGL/Makefile
+# vitaGL vendorizada: el Makefile se versiona (arriba solo se ignora /Makefile,
+# sin "!": el rsync de psvita-toolkit build no entiende negaciones); artefactos no
 /vendor/vitaGL/**/*.o
 /vendor/vitaGL/libvitaGL.a
 

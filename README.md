@@ -136,9 +136,8 @@ Requirements: [vitasdk](https://vitasdk.org/), CMake, Git.
 ```sh
 git clone --recursive https://github.com/MetalSyntax/Raging-Thunder-2-vita.git
 cd Raging-Thunder-2-vita
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build -G Ninja
+cmake --build build
 ```
 
 This produces `eboot.bin` and `ragingthunder2.vpk`. vitaGL is vendored under
@@ -149,6 +148,8 @@ This produces `eboot.bin` and `ragingthunder2.vpk`. vitaGL is vendored under
 - Online features (news / multiplayer) attempt raw sockets without `sceNetInit` — they fail gracefully but have no connectivity.
 - Career progress saved with v1.0.0 / v1.1.0 could not be loaded back ("Failed to
   load profile"); fixed in v1.1.1, but progress from those versions may be lost.
+- In-game text looks soft: the game lays out its 2D UI for 480×320 and scales it
+  to 960×544 with bilinear filtering, as it did on Android.
 - Quitting from the main menu takes a few seconds (the engine releases its resources in `OnDestroy`).
 - Cars take a tint from the ground under them (darker in tunnels, cooler on dusk tracks),
   as the original game does; set `car_ground_tint 0` for the plain paint colors.
